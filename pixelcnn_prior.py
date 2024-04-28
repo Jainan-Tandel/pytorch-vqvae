@@ -4,10 +4,10 @@ import torch.nn.functional as F
 import json
 from torchvision import transforms
 from torchvision.utils import save_image, make_grid
-
+import tqdm
 from modules import VectorQuantizedVAE, GatedPixelCNN
 from datasets import MiniImagenet
-
+from torchvision import datasets
 from tensorboardX import SummaryWriter
 
 def train(data_loader, model, prior, optimizer, args, writer):
@@ -110,13 +110,13 @@ def main(args):
         batch_size=16, shuffle=True)
 
     # Save the label encoder
-    with open('./models/{0}/labels.json'.format(args.output_folder), 'w') as f:
-        json.dump(train_dataset._label_encoder, f)
+    # with open('./models/{0}/labels.json'.format(args.output_folder), 'w') as f:
+        # json.dump(train_dataset._label_encoder, f)
 
     # Fixed images for Tensorboard
     fixed_images, _ = next(iter(test_loader))
-    fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
-    writer.add_image('original', fixed_grid, 0)
+    # fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
+    # writer.add_image('original', fixed_grid, 0)
 
     model = VectorQuantizedVAE(num_channels, args.hidden_size_vae, args.k).to(args.device)
     with open(args.model, 'rb') as f:
@@ -125,11 +125,11 @@ def main(args):
     model.eval()
 
     prior = GatedPixelCNN(args.k, args.hidden_size_prior,
-        args.num_layers, n_classes=len(train_dataset._label_encoder)).to(args.device)
+        args.num_layers, n_classes= args.num_classes ).to(args.device)#len(train_dataset._label_encoder)).to(args.device)
     optimizer = torch.optim.Adam(prior.parameters(), lr=args.lr)
 
     best_loss = -1.
-    for epoch in range(args.num_epochs):
+    for epoch in tqdm.tqdm(range(args.num_epochs)):
         train(train_loader, model, prior, optimizer, args, writer)
         # The validation loss is not properly computed since
         # the classes in the train and valid splits of Mini-Imagenet
@@ -149,11 +149,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PixelCNN Prior for VQ-VAE')
 
     # General
-    parser.add_argument('--data-folder', type=str,
+    parser.add_argument('--data-folder', type=str, default='/tmp/miniimagenet',
         help='name of the data folder')
-    parser.add_argument('--dataset', type=str,
+    parser.add_argument('--dataset', type=str, default='cifar10',
         help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet)')
-    parser.add_argument('--model', type=str,
+    parser.add_argument('--model', type=str, default='models/models/vqvae/best.pt',
         help='filename containing the model')
 
     # Latent space
@@ -169,13 +169,14 @@ if __name__ == '__main__':
     # Optimization
     parser.add_argument('--batch-size', type=int, default=128,
         help='batch size (default: 128)')
-    parser.add_argument('--num-epochs', type=int, default=100,
+    parser.add_argument('--num-epochs', type=int, default=10,
         help='number of epochs (default: 100)')
     parser.add_argument('--lr', type=float, default=3e-4,
         help='learning rate for Adam optimizer (default: 3e-4)')
-
+    parser.add_argument('--num-classes', type=int, default=10,
+                        help='number of classes of data')
     # Miscellaneous
-    parser.add_argument('--output-folder', type=str, default='prior',
+    parser.add_argument('--output-folder', type=str, default='models/pixelcnn_prior',
         help='name of the output folder (default: prior)')
     parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
         help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))

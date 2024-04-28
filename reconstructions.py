@@ -4,8 +4,9 @@ import torch.nn.functional as F
 from torchvision import transforms, datasets
 from torchvision.utils import save_image, make_grid
 import tqdm
-from modules import VectorQuantizedVAE, to_scalar
+from modules import VectorQuantizedVAE, to_scalar, GatedPixelCNN
 from datasets import MiniImagenet
+import matplotlib.pyplot as plt
 
 from tensorboardX import SummaryWriter
 
@@ -57,9 +58,20 @@ def generate_samples(images, model, args):
         x_tilde, _, _ = model(images)
     return x_tilde
 
+def generate_pixel_samples(labels,vae,prior, args):
+    with torch.no_grad():
+        # images = images.to(args.device)
+        # latents = vae.encode(images)
+        # pixelout = prior(latents, labels)
+        pixelout = prior.generate(labels, batch_size=labels.shape[0])
+        x_tilde = vae.decode(pixelout)
+        # print(x_tilde.shape)
+        # x_tilde, _, _ = model(images)
+    return x_tilde
+
 def main(args):
-    writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
-    save_filename = './models/{0}'.format(args.output_folder)
+    # writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
+    # save_filename = './models/{0}'.format(args.output_folder)
 
     if args.dataset in ['mnist', 'fashion-mnist', 'cifar10']:
         transform = transforms.Compose([
@@ -111,36 +123,82 @@ def main(args):
         batch_size=args.batch_size, shuffle=False, drop_last=True,
         num_workers=args.num_workers, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(test_dataset,
-        batch_size=16, shuffle=True)
+        batch_size=16, shuffle=False)
 
     # Fixed images for Tensorboard
-    fixed_images, _ = next(iter(test_loader))
+    fixed_images, fixed_labels = next(iter(test_loader))
     # fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
     # writer.add_image('original', fixed_grid, 0)
 
     model = VectorQuantizedVAE(num_channels, args.hidden_size, args.k).to(args.device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    weights = torch.load('models/models/vqvae/best.pt')
+    model.load_state_dict(weights)
 
+    # pixelmodel = GatedPixelCNN
+    prior = GatedPixelCNN(args.k, args.hidden_size_prior,
+        args.num_layers, n_classes= args.num_classes ).to(args.device)#len(train_dataset._label_encoder)).to(args.device)
+    
+    pixelweights = torch.load('models/models/pixelcnn_prior/prior.pt')
+    prior.load_state_dict(pixelweights)
     # Generate the samples first once
     reconstruction = generate_samples(fixed_images, model, args)
+    
+    artificial = generate_pixel_samples(fixed_labels, model, prior, args)
     # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
     # writer.add_image('reconstruction', grid, 0)
+    print(fixed_images.shape)
+    print(reconstruction.shape)
+    print(artificial.shape)
+    print(fixed_labels.shape)
+    print(torch.min(fixed_images), torch.max(fixed_images))
+    print(torch.min(reconstruction), torch.max(reconstruction))
+    print(torch.min(artificial), torch.max(artificial))
+    fig,ax = plt.subplots(nrows=6,ncols=8)
+    for idx in range(16):
+        ax[idx//8][idx%8].imshow(fixed_images[idx].permute(1,2,0), vmin=-1,vmax=1)
+        ax[idx//8][idx%8].axis('off')
+    
+    for idx in range(16,32):
+        ax[idx//8][idx%8].imshow(reconstruction[idx-16].permute(1,2,0),vmin=-1,vmax=1)
+        ax[idx//8][idx%8].axis('off')
 
-    best_loss = -1.
-    for epoch in tqdm.tqdm(range(args.num_epochs)):
-        train(train_loader, model, optimizer, args, writer)
-        loss, _ = test(valid_loader, model, args, writer)
+    for idx in range(32,48):
+        ax[idx//8][idx%8].imshow(artificial[idx-32].permute(1,2,0),vmin=-1,vmax=1)
+        ax[idx//8][idx%8].axis('off')
 
-        reconstruction = generate_samples(fixed_images, model, args)
-        # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
-        # writer.add_image('reconstruction', grid, epoch + 1)
+    plt.show()
+        
+    # for row in range(2):
+    #     for col in range(8):
+    #         ax[row+2][col%8].imshow(fixed_images[0].permute(1,2,0))
+    #         ax[row+2][col%8].axis('off')
+            
+    # print(reconstruction.shape)
+    # plt.imshow(reconstruction)
+    fig,ax=plt.subplots(4,4)
+    fig.suptitle("Test uniqueness")
+    artificial=generate_pixel_samples(torch.ones((16),dtype=torch.int64), model, prior, args)
+    for idx in range(16):
+        ax[idx//4][idx%4].imshow(artificial[idx].permute(1,2,0),vmin=-1,vmax=1)
+        ax[idx//4][idx%4].axis('off')
+    plt.show()
 
-        if (epoch == 0) or (loss < best_loss):
-            best_loss = loss
-            with open('{0}/best.pt'.format(save_filename), 'wb') as f:
-                torch.save(model.state_dict(), f)
-        with open('{0}/model_{1}.pt'.format(save_filename, epoch + 1), 'wb') as f:
-            torch.save(model.state_dict(), f)
+    # best_loss = -1.
+    # for epoch in tqdm.tqdm(range(args.num_epochs)):
+    #     train(train_loader, model, optimizer, args, writer)
+    #     loss, _ = test(valid_loader, model, args, writer)
+
+    #     reconstruction = generate_samples(fixed_images, model, args)
+    #     # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
+    #     # writer.add_image('reconstruction', grid, epoch + 1)
+
+    #     if (epoch == 0) or (loss < best_loss):
+    #         best_loss = loss
+    #         with open('{0}/best.pt'.format(save_filename), 'wb') as f:
+    #             torch.save(model.state_dict(), f)
+    #     with open('{0}/model_{1}.pt'.format(save_filename, epoch + 1), 'wb') as f:
+    #         torch.save(model.state_dict(), f)
 
 if __name__ == '__main__':
     import argparse
@@ -170,6 +228,13 @@ if __name__ == '__main__':
         help='learning rate for Adam optimizer (default: 2e-4)')
     parser.add_argument('--beta', type=float, default=1.0,
         help='contribution of commitment loss, between 0.1 and 2.0 (default: 1.0)')
+
+    parser.add_argument('--hidden-size-prior', type=int, default=64,
+        help='hidden size for the PixelCNN prior (default: 64)')
+    parser.add_argument('--num-layers', type=int, default=15,
+        help='number of layers for the PixelCNN prior (default: 15)')
+    parser.add_argument('--num-classes', type=int, default=10,
+                        help='number of classes of data')
 
     # Miscellaneous
     parser.add_argument('--output-folder', type=str, default='models/vqvae',
