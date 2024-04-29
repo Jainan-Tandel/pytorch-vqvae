@@ -109,7 +109,9 @@ def main(args):
         num_channels = 3
     elif args.dataset == 'isic':
         transform = transforms.Compose([
-            transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
+            transforms.CenterCrop(size=(448,448)),
+            transforms.Resize(size=(args.input_crop_size,args.input_crop_size)),
+            # transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
@@ -132,7 +134,7 @@ def main(args):
         batch_size=16, shuffle=True)
 
     # Fixed images for Tensorboard
-    fixed_images, _ = next(iter(test_loader))
+    # fixed_images, _ = next(iter(test_loader))
     # fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
     # writer.add_image('original', fixed_grid, 0)
 
@@ -140,7 +142,7 @@ def main(args):
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     # Generate the samples first once
-    reconstruction = generate_samples(fixed_images, model, args)
+    # reconstruction = generate_samples(fixed_images, model, args)
     # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
     # writer.add_image('reconstruction', grid, 0)
 
@@ -153,7 +155,7 @@ def main(args):
         batch_bar.reset(total=(len(valid_loader)))
         batch_bar.set_description(desc="Validating")
         loss, _ = test(valid_loader, model, args, writer, batch_bar)
-        reconstruction = generate_samples(fixed_images, model, args)
+        # reconstruction = generate_samples(fixed_images, model, args)
         # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
         # writer.add_image('reconstruction', grid, epoch + 1)
 
@@ -183,11 +185,13 @@ if __name__ == '__main__':
         help='size of the latent vectors (default: 256)')
     parser.add_argument('--k', type=int, default=512,
         help='number of latent vectors (default: 512)')
+    parser.add_argument('--input-crop-size', type=int,default=64,
+        help='size of the cropped input image (default: 64)')
 
     # Optimization
     parser.add_argument('--batch-size', type=int, default=128,
         help='batch size (default: 128)')
-    parser.add_argument('--num-epochs', type=int, default=100,
+    parser.add_argument('--num-epochs', type=int, default=2,
         help='number of epochs (default: 100)')
     parser.add_argument('--lr', type=float, default=2e-4,
         help='learning rate for Adam optimizer (default: 2e-4)')

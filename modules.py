@@ -150,6 +150,9 @@ class VectorQuantizedVAE(nn.Module):
         x_tilde = self.decoder(z_q_x_st)
         return x_tilde, z_e_x, z_q_x
 
+    def get_shape(self, x):
+        return self.codebook.straight_through(self.encoder(x))[0].shape
+
 
 class GatedActivation(nn.Module):
     def __init__(self):
@@ -161,13 +164,14 @@ class GatedActivation(nn.Module):
 
 
 class GatedMaskedConv2d(nn.Module):
-    def __init__(self, mask_type, dim, kernel, residual=True, n_classes=10):
+    def __init__(self, mask_type, dim, kernel, residual=True, n_classes=None):
         super().__init__()
         assert kernel % 2 == 1, print("Kernel size must be odd")
         self.mask_type = mask_type
         self.residual = residual
-
-        self.class_cond_embedding = nn.Embedding(
+        self.class_cond_embedding=None
+        if n_classes is not None:
+            self.class_cond_embedding = nn.Embedding(
             n_classes, 2 * dim
         )
 
@@ -195,20 +199,29 @@ class GatedMaskedConv2d(nn.Module):
         self.vert_stack.weight.data[:, :, -1].zero_()  # Mask final row
         self.horiz_stack.weight.data[:, :, :, -1].zero_()  # Mask final column
 
-    def forward(self, x_v, x_h, h):
+    def forward(self, x_v, x_h, h=None):
         if self.mask_type == 'A':
             self.make_causal()
 
-        h = self.class_cond_embedding(h)
+        
         h_vert = self.vert_stack(x_v)
         h_vert = h_vert[:, :, :x_v.size(-1), :]
-        out_v = self.gate(h_vert + h[:, :, None, None])
+
+        if self.class_cond_embedding is not None:
+            h = self.class_cond_embedding(h)
+            out_v = self.gate(h_vert + h[:, :, None, None])
+        else:
+            out_v = self.gate(h_vert)
 
         h_horiz = self.horiz_stack(x_h)
         h_horiz = h_horiz[:, :, :, :x_h.size(-2)]
         v2h = self.vert_to_horiz(h_vert)
 
-        out = self.gate(v2h + h_horiz + h[:, :, None, None])
+        if self.class_cond_embedding is not None:
+            out = self.gate(v2h + h_horiz + h[:, :, None, None])
+        else:
+            out = self.gate(v2h + h_horiz)
+
         if self.residual:
             out_h = self.horiz_resid(out) + x_h
         else:
@@ -218,7 +231,7 @@ class GatedMaskedConv2d(nn.Module):
 
 
 class GatedPixelCNN(nn.Module):
-    def __init__(self, input_dim=256, dim=64, n_layers=15, n_classes=10):
+    def __init__(self, input_dim=256, dim=64, n_layers=15, n_classes=None):
         super().__init__()
         self.dim = dim
 
@@ -248,7 +261,7 @@ class GatedPixelCNN(nn.Module):
 
         self.apply(weights_init)
 
-    def forward(self, x, label):
+    def forward(self, x, label=None):
         shp = x.size() + (-1, )
         x = self.embedding(x.view(-1)).view(shp)  # (B, H, W, C)
         x = x.permute(0, 3, 1, 2)  # (B, C, W, W)
@@ -259,7 +272,7 @@ class GatedPixelCNN(nn.Module):
 
         return self.output_conv(x_h)
 
-    def generate(self, label, shape=(8, 8), batch_size=64):
+    def generate(self, label=None, shape=(16, 16), batch_size=64):
         param = next(self.parameters())
         x = torch.zeros(
             (batch_size, *shape),

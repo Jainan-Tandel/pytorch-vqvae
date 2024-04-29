@@ -105,7 +105,9 @@ def main(args):
         num_channels = 3
     elif args.dataset == 'isic':
         transform = transforms.Compose([
-            transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
+            transforms.CenterCrop(size=(448,448)),
+            transforms.Resize(size=(args.input_crop_size,args.input_crop_size)),
+            # transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
@@ -116,6 +118,7 @@ def main(args):
         test_dataset = ISIC(args.data_folder, test=True,
             download=True, transform=transform)
         num_channels = 3
+        args.num_classes = None
 
     # Define the data loaders
     train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -179,6 +182,8 @@ if __name__ == '__main__':
         help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
     parser.add_argument('--model', type=str, default='models/models/vqvae/best.pt',
         help='filename containing the model')
+    parser.add_argument('--input-crop-size', type=int,default=64,
+        help='size of the cropped input image (default: 64)')
 
     # Latent space
     parser.add_argument('--hidden-size-vae', type=int, default=256,
@@ -193,7 +198,7 @@ if __name__ == '__main__':
     # Optimization
     parser.add_argument('--batch-size', type=int, default=128,
         help='batch size (default: 128)')
-    parser.add_argument('--num-epochs', type=int, default=100,
+    parser.add_argument('--num-epochs', type=int, default=2,
         help='number of epochs (default: 100)')
     parser.add_argument('--lr', type=float, default=3e-4,
         help='learning rate for Adam optimizer (default: 3e-4)')

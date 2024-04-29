@@ -181,7 +181,7 @@ class ISIC(data.Dataset):
         # if self.target_transform is not None:
         #     label = self.target_transform(label)
 
-        return image, 1
+        return image, 0
 
     # def _fit_label_encoding(self):
     #     _, labels = zip(*self._data)

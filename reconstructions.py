@@ -58,16 +58,24 @@ def generate_samples(images, model, args):
         x_tilde, _, _ = model(images)
     return x_tilde
 
-def generate_pixel_samples(labels,vae,prior, args):
+def generate_pixel_samples(labels,vae,prior, args, shape=(16,16)):
     with torch.no_grad():
         # images = images.to(args.device)
         # latents = vae.encode(images)
         # pixelout = prior(latents, labels)
-        pixelout = prior.generate(labels, batch_size=labels.shape[0])
+        pixelout = prior.generate(labels, batch_size=labels.shape[0], shape=shape)
         x_tilde = vae.decode(pixelout)
         # print(x_tilde.shape)
         # x_tilde, _, _ = model(images)
     return x_tilde
+
+def unnormalise(images, mean, std):
+    transform = transforms.Compose([
+        transforms.Normalize(mean=(0,0,0),std = [1/x for x in std]),
+        transforms.Normalize(mean= [-x for x in mean], std=1)]
+    )
+    images = transform(images)
+    return images
 
 def main(args):
     # writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
@@ -99,6 +107,7 @@ def main(args):
             test_dataset = datasets.CIFAR10(args.data_folder,
                 train=False, transform=transform)
             num_channels = 3
+        unnormalize_params = {'mean':(0.5, 0.5, 0.5),'std':(0.5, 0.5, 0.5)}
         valid_dataset = test_dataset
     elif args.dataset == 'miniimagenet':
         transform = transforms.Compose([
@@ -114,9 +123,12 @@ def main(args):
         test_dataset = MiniImagenet(args.data_folder, test=True,
             download=True, transform=transform)
         num_channels = 3
+        unnormalize_params = {'mean':(0.5, 0.5, 0.5),'std':(0.5, 0.5, 0.5)}
     elif args.dataset == 'isic':
         transform = transforms.Compose([
-            transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
+            transforms.CenterCrop(size=(448,448)),
+            transforms.Resize(size=(args.input_crop_size,args.input_crop_size)),
+            # transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
@@ -127,6 +139,8 @@ def main(args):
         test_dataset = ISIC(args.data_folder, test=True,
             download=True, transform=transform)
         num_channels = 3
+        args.num_classes = None
+        unnormalize_params = {'mean':(0.485, 0.456, 0.406),'std':(0.229, 0.224, 0.225)}
 
     # Define the data loaders
     train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -144,10 +158,11 @@ def main(args):
     # writer.add_image('original', fixed_grid, 0)
 
     model = VectorQuantizedVAE(num_channels, args.hidden_size, args.k).to(args.device)
+
     # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     weights = torch.load('models/models/vqvae/best.pt')
     model.load_state_dict(weights)
-
+    prior_shape = model.get_shape(fixed_images)[2:]
     # pixelmodel = GatedPixelCNN
     prior = GatedPixelCNN(args.k, args.hidden_size_prior,
         args.num_layers, n_classes= args.num_classes ).to(args.device)#len(train_dataset._label_encoder)).to(args.device)
@@ -157,27 +172,34 @@ def main(args):
     # Generate the samples first once
     reconstruction = generate_samples(fixed_images, model, args)
     
-    artificial = generate_pixel_samples(fixed_labels, model, prior, args)
+    artificial = generate_pixel_samples(fixed_labels, model, prior, args, shape = prior_shape)
     # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
     # writer.add_image('reconstruction', grid, 0)
     print(fixed_images.shape)
     print(reconstruction.shape)
     print(artificial.shape)
     print(fixed_labels.shape)
-    print(torch.min(fixed_images), torch.max(fixed_images))
-    print(torch.min(reconstruction), torch.max(reconstruction))
-    print(torch.min(artificial), torch.max(artificial))
+
+    fixed_images = unnormalise(fixed_images, **unnormalize_params)
+    reconstruction = unnormalise(reconstruction, **unnormalize_params)
+    artificial = unnormalise(artificial, **unnormalize_params)
+
+    flim = (torch.min(fixed_images), torch.max(fixed_images))
+    rlim = (torch.min(reconstruction), torch.max(reconstruction))
+    alim = (torch.min(artificial), torch.max(artificial))
+
+
     fig,ax = plt.subplots(nrows=6,ncols=8)
     for idx in range(16):
-        ax[idx//8][idx%8].imshow(fixed_images[idx].permute(1,2,0), vmin=-1,vmax=1)
+        ax[idx//8][idx%8].imshow(fixed_images[idx].permute(1,2,0), vmin=0,vmax=1)
         ax[idx//8][idx%8].axis('off')
     
     for idx in range(16,32):
-        ax[idx//8][idx%8].imshow(reconstruction[idx-16].permute(1,2,0),vmin=-1,vmax=1)
+        ax[idx//8][idx%8].imshow(reconstruction[idx-16].permute(1,2,0),vmin=0,vmax=1)
         ax[idx//8][idx%8].axis('off')
 
     for idx in range(32,48):
-        ax[idx//8][idx%8].imshow(artificial[idx-32].permute(1,2,0),vmin=-1,vmax=1)
+        ax[idx//8][idx%8].imshow(artificial[idx-32].permute(1,2,0),vmin=0,vmax=1)
         ax[idx//8][idx%8].axis('off')
 
     plt.show()
@@ -191,9 +213,10 @@ def main(args):
     # plt.imshow(reconstruction)
     fig,ax=plt.subplots(4,4)
     fig.suptitle("Test uniqueness")
-    artificial=generate_pixel_samples(torch.ones((16),dtype=torch.int64), model, prior, args)
+    artificial = generate_pixel_samples(torch.zeros((16),dtype=torch.int64), model, prior, args)
+    artificial = unnormalise(artificial,**unnormalize_params)
     for idx in range(16):
-        ax[idx//4][idx%4].imshow(artificial[idx].permute(1,2,0),vmin=-1,vmax=1)
+        ax[idx//4][idx%4].imshow(artificial[idx].permute(1,2,0),vmin=0,vmax=1)
         ax[idx//4][idx%4].axis('off')
     plt.show()
 
@@ -225,7 +248,9 @@ if __name__ == '__main__':
         help='name of the data folder')
     parser.add_argument('--dataset', type=str, default='isic',
         help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
-
+    parser.add_argument('--input-crop-size', type=int,default=64,
+        help='size of the cropped input image (default: 64)')
+    
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
         help='size of the latent vectors (default: 256)')
