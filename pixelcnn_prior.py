@@ -11,8 +11,6 @@ from torchvision import datasets
 from tensorboardX import SummaryWriter
 
 def train(data_loader, model, prior, optimizer, args, writer, batch_bar=None):
-    if batch_bar:
-        batch_bar.clear()
     for images, labels in data_loader:
         with torch.no_grad():
             images = images.to(args.device)
@@ -36,7 +34,7 @@ def train(data_loader, model, prior, optimizer, args, writer, batch_bar=None):
         if batch_bar:
             batch_bar.update()
 
-def test(data_loader, model, prior, args, writer):
+def test(data_loader, model, prior, args, writer, batch_bar=None):
     with torch.no_grad():
         loss = 0.
         for images, labels in data_loader:
@@ -49,6 +47,9 @@ def test(data_loader, model, prior, args, writer):
             logits = logits.permute(0, 2, 3, 1).contiguous()
             loss += F.cross_entropy(logits.view(-1, args.k),
                                     latents.view(-1))
+            if batch_bar:
+                batch_bar.update()
+
 
         loss /= len(data_loader)
 
@@ -146,18 +147,23 @@ def main(args):
     optimizer = torch.optim.Adam(prior.parameters(), lr=args.lr)
 
     best_loss = -1.
-    batch_bar = tqdm.tqdm(train_loader,desc="Train_bar")
+    batch_bar = tqdm.tqdm(range(len(train_loader)),desc="Training")
     for epoch in tqdm.tqdm(range(args.num_epochs)):
-        train(train_loader, model, prior, optimizer, args, writer)
+        batch_bar.reset(total=(len(train_loader)))
+        batch_bar.set_description(desc="Training")
+        train(train_loader, model, prior, optimizer, args, writer, batch_bar)
+        batch_bar.reset(total=(len(valid_loader)))
+        batch_bar.set_description(desc="Validating")
         # The validation loss is not properly computed since
         # the classes in the train and valid splits of Mini-Imagenet
         # do not overlap.
-        loss = test(valid_loader, model, prior, args, writer)
+        loss = test(valid_loader, model, prior, args, writer, batch_bar)
 
         if (epoch == 0) or (loss < best_loss):
             best_loss = loss
             with open(save_filename, 'wb') as f:
                 torch.save(prior.state_dict(), f)
+    batch_bar.close()
 
 if __name__ == '__main__':
     import argparse

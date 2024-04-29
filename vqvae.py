@@ -10,8 +10,6 @@ from datasets import MiniImagenet, ISIC
 from tensorboardX import SummaryWriter
 
 def train(data_loader, model, optimizer, args, writer, batch_bar=None):
-    if batch_bar:
-        batch_bar.clear()
     for images, _ in data_loader:
         images = images.to(args.device)
 
@@ -37,7 +35,7 @@ def train(data_loader, model, optimizer, args, writer, batch_bar=None):
         if batch_bar:
             batch_bar.update()
 
-def test(data_loader, model, args, writer):
+def test(data_loader, model, args, writer, batch_bar=None):
     with torch.no_grad():
         loss_recons, loss_vq = 0., 0.
         for images, _ in data_loader:
@@ -45,10 +43,13 @@ def test(data_loader, model, args, writer):
             x_tilde, z_e_x, z_q_x = model(images)
             loss_recons += F.mse_loss(x_tilde, images)
             loss_vq += F.mse_loss(z_q_x, z_e_x)
+            if batch_bar:
+                batch_bar.update()
+
 
         loss_recons /= len(data_loader)
         loss_vq /= len(data_loader)
-
+        
     # Logs
     writer.add_scalar('loss/test/reconstruction', loss_recons.item(), args.steps)
     writer.add_scalar('loss/test/quantization', loss_vq.item(), args.steps)
@@ -144,11 +145,14 @@ def main(args):
     # writer.add_image('reconstruction', grid, 0)
 
     best_loss = -1.
-    batch_bar = tqdm.tqdm(train_loader,desc="Train_bar")
-    for epoch in tqdm.tqdm(range(args.num_epochs)):
+    batch_bar = tqdm.tqdm(range(len(train_loader)),desc="Training")
+    for epoch in tqdm.tqdm(range(args.num_epochs), desc="Epochs"):
+        batch_bar.reset(total=(len(train_loader)))
+        batch_bar.set_description(desc="Training")
         train(train_loader, model, optimizer, args, writer, batch_bar)
-        loss, _ = test(valid_loader, model, args, writer)
-
+        batch_bar.reset(total=(len(valid_loader)))
+        batch_bar.set_description(desc="Validating")
+        loss, _ = test(valid_loader, model, args, writer, batch_bar)
         reconstruction = generate_samples(fixed_images, model, args)
         # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
         # writer.add_image('reconstruction', grid, epoch + 1)
@@ -159,6 +163,7 @@ def main(args):
                 torch.save(model.state_dict(), f)
         with open('{0}/model_{1}.pt'.format(save_filename, epoch + 1), 'wb') as f:
             torch.save(model.state_dict(), f)
+    batch_bar.close()
 
 if __name__ == '__main__':
     import argparse
