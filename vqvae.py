@@ -5,11 +5,13 @@ from torchvision import transforms, datasets
 from torchvision.utils import save_image, make_grid
 import tqdm
 from modules import VectorQuantizedVAE, to_scalar
-from datasets import MiniImagenet
+from datasets import MiniImagenet, ISIC
 
 from tensorboardX import SummaryWriter
 
-def train(data_loader, model, optimizer, args, writer):
+def train(data_loader, model, optimizer, args, writer, batch_bar=None):
+    if batch_bar:
+        batch_bar.clear()
     for images, _ in data_loader:
         images = images.to(args.device)
 
@@ -32,6 +34,8 @@ def train(data_loader, model, optimizer, args, writer):
 
         optimizer.step()
         args.steps += 1
+        if batch_bar:
+            batch_bar.update()
 
 def test(data_loader, model, args, writer):
     with torch.no_grad():
@@ -102,6 +106,19 @@ def main(args):
         test_dataset = MiniImagenet(args.data_folder, test=True,
             download=True, transform=transform)
         num_channels = 3
+    elif args.dataset == 'isic':
+        transform = transforms.Compose([
+            transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+        ])
+        train_dataset = ISIC(args.data_folder, train=True,
+            download=True, transform=transform)
+        valid_dataset = ISIC(args.data_folder, valid=True,
+            download=True, transform=transform)
+        test_dataset = ISIC(args.data_folder, test=True,
+            download=True, transform=transform)
+        num_channels = 3
 
     # Define the data loaders
     train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -127,8 +144,9 @@ def main(args):
     # writer.add_image('reconstruction', grid, 0)
 
     best_loss = -1.
+    batch_bar = tqdm.tqdm(train_loader,desc="Train_bar")
     for epoch in tqdm.tqdm(range(args.num_epochs)):
-        train(train_loader, model, optimizer, args, writer)
+        train(train_loader, model, optimizer, args, writer, batch_bar)
         loss, _ = test(valid_loader, model, args, writer)
 
         reconstruction = generate_samples(fixed_images, model, args)
@@ -152,8 +170,8 @@ if __name__ == '__main__':
     # General
     parser.add_argument('--data-folder', type=str, default='/tmp/miniimagenet',
         help='name of the data folder')
-    parser.add_argument('--dataset', type=str, default='cifar10',
-        help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet)')
+    parser.add_argument('--dataset', type=str, default='isic',
+        help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
 
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
@@ -164,7 +182,7 @@ if __name__ == '__main__':
     # Optimization
     parser.add_argument('--batch-size', type=int, default=128,
         help='batch size (default: 128)')
-    parser.add_argument('--num-epochs', type=int, default=10,
+    parser.add_argument('--num-epochs', type=int, default=100,
         help='number of epochs (default: 100)')
     parser.add_argument('--lr', type=float, default=2e-4,
         help='learning rate for Adam optimizer (default: 2e-4)')
@@ -176,7 +194,7 @@ if __name__ == '__main__':
         help='name of the output folder (default: vqvae)')
     parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
         help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
-    parser.add_argument('--device', type=str, default='cpu',
+    parser.add_argument('--device', type=str, default='cuda',
         help='set the device (cpu or cuda, default: cpu)')
 
     args = parser.parse_args()

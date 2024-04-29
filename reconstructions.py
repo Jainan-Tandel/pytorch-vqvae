@@ -5,7 +5,7 @@ from torchvision import transforms, datasets
 from torchvision.utils import save_image, make_grid
 import tqdm
 from modules import VectorQuantizedVAE, to_scalar, GatedPixelCNN
-from datasets import MiniImagenet
+from datasets import MiniImagenet, ISIC
 import matplotlib.pyplot as plt
 
 from tensorboardX import SummaryWriter
@@ -114,6 +114,19 @@ def main(args):
         test_dataset = MiniImagenet(args.data_folder, test=True,
             download=True, transform=transform)
         num_channels = 3
+    elif args.dataset == 'isic':
+        transform = transforms.Compose([
+            transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
+        ])
+        train_dataset = ISIC(args.data_folder, train=True,
+            download=True, transform=transform)
+        valid_dataset = ISIC(args.data_folder, valid=True,
+            download=True, transform=transform)
+        test_dataset = ISIC(args.data_folder, test=True,
+            download=True, transform=transform)
+        num_channels = 3
 
     # Define the data loaders
     train_loader = torch.utils.data.DataLoader(train_dataset,
@@ -210,8 +223,8 @@ if __name__ == '__main__':
     # General
     parser.add_argument('--data-folder', type=str, default='/tmp/miniimagenet',
         help='name of the data folder')
-    parser.add_argument('--dataset', type=str, default='cifar10',
-        help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet)')
+    parser.add_argument('--dataset', type=str, default='isic',
+        help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
 
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
