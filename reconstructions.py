@@ -7,7 +7,7 @@ import tqdm
 from modules import VectorQuantizedVAE, to_scalar, GatedPixelCNN
 from datasets import MiniImagenet, ISIC
 import matplotlib.pyplot as plt
-
+import datetime
 # from tensorboardX import SummaryWriter
 
 def generate_samples(images, model, args):
@@ -84,8 +84,8 @@ def main(args):
         unnormalize_params = {'mean':(0.5, 0.5, 0.5),'std':(0.5, 0.5, 0.5)}
     elif args.dataset == 'isic':
         transform = transforms.Compose([
-            transforms.CenterCrop(size=(448,448)),
-            transforms.Resize(size=(args.input_crop_size,args.input_crop_size)),
+            transforms.CenterCrop(size=(args.input_crop_size,args.input_crop_size)),
+            transforms.Resize(size=(args.input_resize_size,args.input_resize_size)),
             # transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
@@ -160,7 +160,7 @@ def main(args):
         ax[idx//8][idx%8].imshow(artificial[idx-32].permute(1,2,0),vmin=0,vmax=1)
         ax[idx//8][idx%8].axis('off')
 
-    plt.show()
+    plt.savefig(os.path.join(args.output_folder,"test_figure.png"))
         
     # for row in range(2):
     #     for col in range(8):
@@ -176,7 +176,8 @@ def main(args):
     for idx in range(16):
         ax[idx//4][idx%4].imshow(artificial[idx].permute(1,2,0),vmin=0,vmax=1)
         ax[idx//4][idx%4].axis('off')
-    plt.show()
+    plt.savefig(os.path.join(args.output_folder,"test_uniqueness.png"))
+        
 
     # best_loss = -1.
     # for epoch in tqdm.tqdm(range(args.num_epochs)):
@@ -195,25 +196,29 @@ def main(args):
     #         torch.save(model.state_dict(), f)
 
 if __name__ == '__main__':
+    timestamp = datetime.datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
     import argparse
     import os
     import multiprocessing as mp
 
-    parser = argparse.ArgumentParser(description='VQ-VAE')
+    parser = argparse.ArgumentParser(description='Reconstructor for VQ-VAE and PixelCNN generation')
 
     # General
     parser.add_argument('--data-folder', type=str, default='/tmp/miniimagenet',
         help='name of the data folder')
     parser.add_argument('--dataset', type=str, default='isic',
         help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
-    parser.add_argument('--input-crop-size', type=int,default=64,
-        help='size of the cropped input image (default: 64)')
+    parser.add_argument('--input-crop-size', type=int,default=448,
+        help='size of the cropped input image (default: 448)')
+    parser.add_argument('--input-resize-size', type=int,default=128,
+        help='size of the cropped input image (default: 128)')
+
     
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
         help='size of the latent vectors (default: 256)')
-    parser.add_argument('--k', type=int, default=512,
-        help='number of latent vectors (default: 512)')
+    parser.add_argument('--k', type=int, default=1024,
+        help='number of latent vectors (default: 1024)')
 
     # Optimization
     parser.add_argument('--batch-size', type=int, default=128,
@@ -225,16 +230,16 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, default=1.0,
         help='contribution of commitment loss, between 0.1 and 2.0 (default: 1.0)')
 
-    parser.add_argument('--hidden-size-prior', type=int, default=64,
-        help='hidden size for the PixelCNN prior (default: 64)')
+    parser.add_argument('--hidden-size-prior', type=int, default=80,
+        help='hidden size for the PixelCNN prior (default: 80)')
     parser.add_argument('--num-layers', type=int, default=15,
         help='number of layers for the PixelCNN prior (default: 15)')
     parser.add_argument('--num-classes', type=int, default=10,
                         help='number of classes of data')
 
     # Miscellaneous
-    parser.add_argument('--output-folder', type=str, default='models/vqvae',
-        help='name of the output folder (default: vqvae)')
+    parser.add_argument('--output-folder', type=str, default=f'figures/{timestamp}',
+        help='name of the output folder (default: figures/\'timestamp\')')
     parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
         help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
     parser.add_argument('--device', type=str, default='cpu',
@@ -247,6 +252,8 @@ if __name__ == '__main__':
         os.makedirs('./logs')
     if not os.path.exists('./models'):
         os.makedirs('./models')
+    if not os.path.exists(args.output_folder):
+        os.makedirs(args.output_folder)
     # Device
     args.device = torch.device(args.device
         if torch.cuda.is_available() else 'cpu')

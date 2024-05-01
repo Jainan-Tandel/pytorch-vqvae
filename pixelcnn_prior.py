@@ -62,6 +62,27 @@ def test(data_loader, model, prior, args,  batch_bar=None):
     return loss.item()
 
 def main(args):
+    timestamp = datetime.datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+
+    wandb.init(project = "VQVAE_DL",
+               entity = "m23csa010",
+               config={
+                   "lr":args.lr,
+                   "epochs":args.num_epochs,
+                   "latent_size":args.hidden_size_vae,
+                   "latent_number":args.k,
+                   "prior_layer_size":args.hidden_size_prior,
+                   "prior_layers":args.num_layers,
+                   "input_crop_size":args.input_crop_size,
+                   "input_resize_size":args.input_resize_size,
+                   "batch_size":args.batch_size,
+                   "dataset":args.dataset,
+                   "device":args.device
+               },
+               name=f"PixelCNN_{timestamp}",
+               dir='./logs/{0}'.format(args.output_folder),
+               )
+    
     # writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
     save_filename = './models/{0}/prior.pt'.format(args.output_folder)
 
@@ -108,8 +129,8 @@ def main(args):
         num_channels = 3
     elif args.dataset == 'isic':
         transform = transforms.Compose([
-            transforms.CenterCrop(size=(448,448)),
-            transforms.Resize(size=(args.input_crop_size,args.input_crop_size)),
+            transforms.CenterCrop(size=(args.input_crop_size,args.input_crop_size)),
+            transforms.Resize(size=(args.input_resize_size,args.input_resize_size)),
             # transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
@@ -183,8 +204,10 @@ if __name__ == '__main__':
         help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
     parser.add_argument('--model', type=str, default='models/models/vqvae/best.pt',
         help='filename containing the model')
-    parser.add_argument('--input-crop-size', type=int,default=64,
-        help='size of the cropped input image (default: 64)')
+    parser.add_argument('--input-crop-size', type=int,default=448,
+        help='size of the cropped input image (default: 448)')
+    parser.add_argument('--input-resize-size', type=int,default=128,
+        help='size of the cropped input image (default: 128)')
 
     # Latent space
     parser.add_argument('--hidden-size-vae', type=int, default=256,
