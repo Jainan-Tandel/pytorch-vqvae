@@ -8,11 +8,11 @@ def pil_loader(path):
         return img.convert('RGB')
 
 class ISIC(data.Dataset):
-    base_folder = os.curdir
+    base_folder = "."
     def __init__(self, root, train=False, valid=False, test=False,
                  transform=None, target_transform=None):
         super(ISIC, self).__init__()
-        self.base_folder = os.path.join(self.base_folder,root)
+        self.base_folder = (self.base_folder+root)
         self.train = train
         self.valid = valid
         self.test = test
@@ -25,9 +25,9 @@ class ISIC(data.Dataset):
                 valid, test))
 
         if train:
-            self.image_folder = os.path.join(self.base_folder, "Train_data")
+            self.image_folder = self.base_folder+ "/Train_data"
         elif valid or test:
-            self.image_folder = os.path.join(self.base_folder, "Test_data")
+            self.image_folder = self.base_folder+ "/Test_data"
             
         else:
             raise ValueError('Unknown split.')
