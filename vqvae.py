@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision import transforms, datasets
-from torchvision.utils import save_image, make_grid
 import tqdm
 from modules import VectorQuantizedVAE, to_scalar
 from datasets import ISIC

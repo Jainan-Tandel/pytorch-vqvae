@@ -2,10 +2,9 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torchvision import transforms, datasets
-from torchvision.utils import save_image, make_grid
 import tqdm
 from modules import VectorQuantizedVAE, to_scalar, GatedPixelCNN
-from datasets import MiniImagenet, ISIC
+from datasets import ISIC
 import matplotlib.pyplot as plt
 import datetime
 from torchvision.models import inception_v3, Inception_V3_Weights
@@ -101,12 +100,9 @@ def main(args):
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
-        # train_dataset = ISIC(args.data_folder, train=True,
-        #     download=True, transform=transform)
-        # valid_dataset = ISIC(args.data_folder, valid=True,
-        #     download=True, transform=transform)
-        test_dataset = ISIC(args.data_folder, test=True,
-            download=True, transform=transform)
+        # train_dataset = ISIC(args.data_folder, train=True, transform=transform)
+        # valid_dataset = ISIC(args.data_folder, valid=True, transform=transform)
+        test_dataset = ISIC(args.data_folder, test=True, transform=transform)
         num_channels = 3
         args.num_classes = None
         unnormalize_params = {'mean':(0.485, 0.456, 0.406),'std':(0.229, 0.224, 0.225)}

@@ -3,10 +3,9 @@ import torch
 import torch.nn.functional as F
 import json
 from torchvision import transforms
-from torchvision.utils import save_image, make_grid
 import tqdm
 from modules import VectorQuantizedVAE, GatedPixelCNN
-from datasets import MiniImagenet, ISIC
+from datasets import ISIC
 from torchvision import datasets
 import wandb
 import datetime
@@ -113,12 +112,9 @@ def main(args):
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
-        train_dataset = ISIC(args.data_folder, train=True,
-            download=True, transform=transform)
-        valid_dataset = ISIC(args.data_folder, valid=True,
-            download=True, transform=transform)
-        test_dataset = ISIC(args.data_folder, test=True,
-            download=True, transform=transform)
+        train_dataset = ISIC(args.data_folder, train=True, transform=transform)
+        valid_dataset = ISIC(args.data_folder, valid=True, transform=transform)
+        test_dataset = ISIC(args.data_folder, test=True, transform=transform)
         num_channels = 3
         args.num_classes = None
 
@@ -130,7 +126,6 @@ def main(args):
         num_workers=args.num_workers, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(test_dataset,
         batch_size=16, shuffle=True)
-
 
     model = VectorQuantizedVAE(num_channels, args.hidden_size_vae, args.k).to(args.device)
     with open(args.model, 'rb') as f:
