@@ -175,7 +175,7 @@ class GatedMaskedConv2d(nn.Module):
             n_classes, 2 * dim
         )
 
-        kernel_shp = (kernel // 2 + 1, kernel)  # (ceil(n/2), n)
+        kernel_shp = (kernel // 2 + 1, kernel)  
         padding_shp = (kernel // 2, kernel // 2)
         self.vert_stack = nn.Conv2d(
             dim, dim * 2,
@@ -235,14 +235,10 @@ class GatedPixelCNN(nn.Module):
         super().__init__()
         self.dim = dim
 
-        # Create embedding layer to embed input
         self.embedding = nn.Embedding(input_dim, dim)
 
-        # Building the PixelCNN layer by layer
         self.layers = nn.ModuleList()
 
-        # Initial block with Mask-A convolution
-        # Rest with Mask-B convolutions
         for i in range(n_layers):
             mask_type = 'A' if i == 0 else 'B'
             kernel = 7 if i == 0 else 3
@@ -252,7 +248,6 @@ class GatedPixelCNN(nn.Module):
                 GatedMaskedConv2d(mask_type, dim, kernel, residual, n_classes)
             )
 
-        # Add the output layer
         self.output_conv = nn.Sequential(
             nn.Conv2d(dim, 512, 1),
             nn.ReLU(True),

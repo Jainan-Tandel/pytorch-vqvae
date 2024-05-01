@@ -8,7 +8,7 @@ from modules import VectorQuantizedVAE, to_scalar, GatedPixelCNN
 from datasets import MiniImagenet, ISIC
 import matplotlib.pyplot as plt
 import datetime
-# from tensorboardX import SummaryWriter
+from torchvision.models import inception_v3, Inception_V3_Weights
 
 def generate_samples(images, model, args):
     with torch.no_grad():
@@ -18,13 +18,8 @@ def generate_samples(images, model, args):
 
 def generate_pixel_samples(labels,vae,prior, args, shape=(16,16)):
     with torch.no_grad():
-        # images = images.to(args.device)
-        # latents = vae.encode(images)
-        # pixelout = prior(latents, labels)
         pixelout = prior.generate(labels, batch_size=labels.shape[0], shape=shape)
         x_tilde = vae.decode(pixelout)
-        # print(x_tilde.shape)
-        # x_tilde, _, _ = model(images)
     return x_tilde
 
 def unnormalise(images, mean, std):
@@ -35,31 +30,61 @@ def unnormalise(images, mean, std):
     images = transform(images)
     return images
 
-def main(args):
-    # writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
-    # save_filename = './models/{0}'.format(args.output_folder)
+def plot_and_calculate_inception_score(test_loader, model, prior, prior_shape, unnormalize_params, num_images=100):
+    inception_model = inception_v3(weights = Inception_V3_Weights.DEFAULT, transform_input=False).eval().to(args.device)
 
+    preds_list = []
+    print(num_images//16 + min((num_images%16),1))
+    for i, (_, fixed_labels) in tqdm.tqdm(enumerate(test_loader),desc="Generation", total = num_images//16 + min((num_images%16),1)):
+        with torch.no_grad():
+            artificial = generate_pixel_samples(fixed_labels, model, prior, args, shape = prior_shape)
+
+            batch_preds = F.softmax(inception_model(artificial.to(args.device)), dim=1)
+
+            preds_list.append(batch_preds.cpu().numpy())
+
+            artificial = unnormalise(artificial, **unnormalize_params)
+
+            fig,ax = plt.subplots(nrows=4,ncols=4)
+            for idx in range(min(len(artificial),16)):
+                ax[idx//4][idx%4].imshow(artificial[idx].permute(1,2,0), vmin=0,vmax=1)
+                ax[idx//4][idx%4].axis('off')
+            
+            plt.title(f"Fake Batch {i}")
+            plt.savefig(os.path.join(args.output_folder,f"fake_figure_{i}.png"))
+            plt.close()
+        if i *16>num_images: break
+
+    preds = torch.tensor(np.concatenate(preds_list, axis=0))
+    mean_preds = torch.mean(preds, dim=0)
+    std_preds = torch.std(preds, dim=0)
+
+    kl_divs = F.kl_div(mean_preds.log(), std_preds, reduction='sum')
+    avg_kl_div = torch.mean(kl_divs)
+    inception_score = torch.exp(avg_kl_div)
+
+    return inception_score.item()
+
+
+def main(args):
     if args.dataset in ['mnist', 'fashion-mnist', 'cifar10']:
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
         if args.dataset == 'mnist':
-            # Define the train & test datasets
             train_dataset = datasets.MNIST(args.data_folder, train=True,
                 download=True, transform=transform)
             test_dataset = datasets.MNIST(args.data_folder, train=False,
                 transform=transform)
             num_channels = 1
         elif args.dataset == 'fashion-mnist':
-            # Define the train & test datasets
             train_dataset = datasets.FashionMNIST(args.data_folder,
                 train=True, download=True, transform=transform)
             test_dataset = datasets.FashionMNIST(args.data_folder,
                 train=False, transform=transform)
             num_channels = 1
         elif args.dataset == 'cifar10':
-            # Define the train & test datasets
             train_dataset = datasets.CIFAR10(args.data_folder,
                 train=True, download=True, transform=transform)
             test_dataset = datasets.CIFAR10(args.data_folder,
@@ -67,21 +92,7 @@ def main(args):
             num_channels = 3
         unnormalize_params = {'mean':(0.5, 0.5, 0.5),'std':(0.5, 0.5, 0.5)}
         valid_dataset = test_dataset
-    elif args.dataset == 'miniimagenet':
-        transform = transforms.Compose([
-            transforms.RandomResizedCrop(128),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ])
-        # Define the train, valid & test datasets
-        train_dataset = MiniImagenet(args.data_folder, train=True,
-            download=True, transform=transform)
-        valid_dataset = MiniImagenet(args.data_folder, valid=True,
-            download=True, transform=transform)
-        test_dataset = MiniImagenet(args.data_folder, test=True,
-            download=True, transform=transform)
-        num_channels = 3
-        unnormalize_params = {'mean':(0.5, 0.5, 0.5),'std':(0.5, 0.5, 0.5)}
+ 
     elif args.dataset == 'isic':
         transform = transforms.Compose([
             transforms.CenterCrop(size=(args.input_crop_size,args.input_crop_size)),
@@ -100,7 +111,6 @@ def main(args):
         args.num_classes = None
         unnormalize_params = {'mean':(0.485, 0.456, 0.406),'std':(0.229, 0.224, 0.225)}
 
-    # Define the data loaders
     # train_loader = torch.utils.data.DataLoader(train_dataset,
     #     batch_size=args.batch_size, shuffle=False,
     #     num_workers=args.num_workers, pin_memory=True)
@@ -110,90 +120,55 @@ def main(args):
     test_loader = torch.utils.data.DataLoader(test_dataset,
         batch_size=16, shuffle=False)
 
-    # Fixed images for Tensorboard
-    fixed_images, fixed_labels = next(iter(test_loader))
-    # fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
-    # writer.add_image('original', fixed_grid, 0)
+    fixed_images, _ = next(iter(test_loader))
 
     model = VectorQuantizedVAE(num_channels, args.hidden_size, args.k).to(args.device)
 
-    # optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     weights = torch.load('models/models/vqvae/best.pt')
     model.load_state_dict(weights)
     prior_shape = model.get_shape(fixed_images)[2:]
-    # pixelmodel = GatedPixelCNN
-    prior = GatedPixelCNN(args.k, args.hidden_size_prior,
-        args.num_layers, n_classes= args.num_classes ).to(args.device)#len(train_dataset._label_encoder)).to(args.device)
+
+    prior = GatedPixelCNN(args.k, args.hidden_size_prior, args.num_layers, n_classes = args.num_classes ).to(args.device)#len(train_dataset._label_encoder)).to(args.device)
     
     pixelweights = torch.load('models/models/pixelcnn_prior/prior.pt')
     prior.load_state_dict(pixelweights)
+    model.eval()
+    prior.eval()
     
-    # for fixed_image, fixed_labels in test_loader:
-    reconstruction = generate_samples(fixed_images, model, args)
-    artificial = generate_pixel_samples(fixed_labels, model, prior, args, shape = prior_shape)
-    # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
-    # writer.add_image('reconstruction', grid, 0)
-    print(fixed_images.shape)
-    print(reconstruction.shape)
-    print(artificial.shape)
-    print(fixed_labels.shape)
+    for i, (fixed_images, _) in tqdm.tqdm(enumerate(test_loader),desc="Reconstruction", total=len(test_loader)):
+        with torch.no_grad():
+            reconstruction = generate_samples(fixed_images, model, args)
+            # artificial = generate_pixel_samples(fixed_labels, model, prior, args, shape = prior_shape)
 
-    fixed_images = unnormalise(fixed_images, **unnormalize_params)
-    reconstruction = unnormalise(reconstruction, **unnormalize_params)
-    artificial = unnormalise(artificial, **unnormalize_params)
+            fixed_images = unnormalise(fixed_images, **unnormalize_params)
+            reconstruction = unnormalise(reconstruction, **unnormalize_params)
+            # artificial = unnormalise(artificial, **unnormalize_params)
 
-    flim = (torch.min(fixed_images), torch.max(fixed_images))
-    rlim = (torch.min(reconstruction), torch.max(reconstruction))
-    alim = (torch.min(artificial), torch.max(artificial))
+            # flim = (torch.min(fixed_images), torch.max(fixed_images))
+            # rlim = (torch.min(reconstruction), torch.max(reconstruction))
+            # alim = (torch.min(artificial), torch.max(artificial))
 
-
-    fig,ax = plt.subplots(nrows=6,ncols=8)
-    for idx in range(16):
-        ax[idx//8][idx%8].imshow(fixed_images[idx].permute(1,2,0), vmin=0,vmax=1)
-        ax[idx//8][idx%8].axis('off')
-    
-    for idx in range(16,32):
-        ax[idx//8][idx%8].imshow(reconstruction[idx-16].permute(1,2,0),vmin=0,vmax=1)
-        ax[idx//8][idx%8].axis('off')
-
-    for idx in range(32,48):
-        ax[idx//8][idx%8].imshow(artificial[idx-32].permute(1,2,0),vmin=0,vmax=1)
-        ax[idx//8][idx%8].axis('off')
-
-    plt.savefig(os.path.join(args.output_folder,"test_figure.png"))
-        
-    # for row in range(2):
-    #     for col in range(8):
-    #         ax[row+2][col%8].imshow(fixed_images[0].permute(1,2,0))
-    #         ax[row+2][col%8].axis('off')
+            fig,ax = plt.subplots(nrows=4,ncols=8)
+            for idx in range(min(len(fixed_images),16)):
+                ax[idx//8][idx%8].imshow(fixed_images[idx].permute(1,2,0), vmin=0,vmax=1)
+                ax[idx//8][idx%8].axis('off')
             
-    # print(reconstruction.shape)
-    # plt.imshow(reconstruction)
-    fig,ax=plt.subplots(4,4)
-    fig.suptitle("Test uniqueness")
-    artificial = generate_pixel_samples(torch.zeros((16),dtype=torch.int64), model, prior, args)
-    artificial = unnormalise(artificial,**unnormalize_params)
-    for idx in range(16):
-        ax[idx//4][idx%4].imshow(artificial[idx].permute(1,2,0),vmin=0,vmax=1)
-        ax[idx//4][idx%4].axis('off')
-    plt.savefig(os.path.join(args.output_folder,"test_uniqueness.png"))
-        
+            for idx in range(16, min(len(fixed_images),16) +16):
+                ax[idx//8][idx%8].imshow(reconstruction[idx-16].permute(1,2,0),vmin=0,vmax=1)
+                ax[idx//8][idx%8].axis('off')
 
-    # best_loss = -1.
-    # for epoch in tqdm.tqdm(range(args.num_epochs)):
-    #     train(train_loader, model, optimizer, args, writer)
-    #     loss, _ = test(valid_loader, model, args, writer)
+            # for idx in range(32,48):
+            #     ax[idx//8][idx%8].imshow(artificial[idx-32].permute(1,2,0),vmin=0,vmax=1)
+            #     ax[idx//8][idx%8].axis('off')
 
-    #     reconstruction = generate_samples(fixed_images, model, args)
-    #     # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
-    #     # writer.add_image('reconstruction', grid, epoch + 1)
+            fig.suptitle(f"Reconstruction batch = {i}")
 
-    #     if (epoch == 0) or (loss < best_loss):
-    #         best_loss = loss
-    #         with open('{0}/best.pt'.format(save_filename), 'wb') as f:
-    #             torch.save(model.state_dict(), f)
-    #     with open('{0}/model_{1}.pt'.format(save_filename, epoch + 1), 'wb') as f:
-    #         torch.save(model.state_dict(), f)
+            plt.savefig(os.path.join(args.output_folder,f"test_figure_{i}.png"))
+            plt.close()
+    
+    Inception_score = plot_and_calculate_inception_score(test_loader, model, prior, prior_shape, unnormalize_params)
+
+    print(Inception_score)
 
 if __name__ == '__main__':
     timestamp = datetime.datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
@@ -204,15 +179,22 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Reconstructor for VQ-VAE and PixelCNN generation')
 
     # General
-    parser.add_argument('--data-folder', type=str, default='/tmp/miniimagenet',
+    parser.add_argument('--data-folder', type=str, default='/data',
         help='name of the data folder')
     parser.add_argument('--dataset', type=str, default='isic',
-        help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
+        help='name of the dataset (mnist, fashion-mnist, cifar10, isic)')
+    parser.add_argument('--output-folder', type=str, default=f'figures/{timestamp}',
+        help='name of the output folder (default: figures/\'timestamp\')')
+    parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
+        help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
+    parser.add_argument('--device', type=str, default='cpu',
+        help='set the device (cpu or cuda, default: cpu)')
+    
+    # Image preprocess
     parser.add_argument('--input-crop-size', type=int,default=448,
         help='size of the cropped input image (default: 448)')
     parser.add_argument('--input-resize-size', type=int,default=128,
         help='size of the cropped input image (default: 128)')
-
     
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
@@ -230,6 +212,7 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, default=1.0,
         help='contribution of commitment loss, between 0.1 and 2.0 (default: 1.0)')
 
+    # Prior
     parser.add_argument('--hidden-size-prior', type=int, default=80,
         help='hidden size for the PixelCNN prior (default: 80)')
     parser.add_argument('--num-layers', type=int, default=15,
@@ -237,31 +220,15 @@ if __name__ == '__main__':
     parser.add_argument('--num-classes', type=int, default=10,
                         help='number of classes of data')
 
-    # Miscellaneous
-    parser.add_argument('--output-folder', type=str, default=f'figures/{timestamp}',
-        help='name of the output folder (default: figures/\'timestamp\')')
-    parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
-        help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
-    parser.add_argument('--device', type=str, default='cpu',
-        help='set the device (cpu or cuda, default: cpu)')
-
     args = parser.parse_args()
 
-    # Create logs and models folder if they don't exist
-    if not os.path.exists('./logs'):
-        os.makedirs('./logs')
-    if not os.path.exists('./models'):
-        os.makedirs('./models')
     if not os.path.exists(args.output_folder):
         os.makedirs(args.output_folder)
-    # Device
-    args.device = torch.device(args.device
-        if torch.cuda.is_available() else 'cpu')
-    # Slurm
-    if 'SLURM_JOB_ID' in os.environ:
-        args.output_folder += '-{0}'.format(os.environ['SLURM_JOB_ID'])
-    if not os.path.exists('./models/{0}'.format(args.output_folder)):
-        os.makedirs('./models/{0}'.format(args.output_folder))
+    
+    args.device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+
+    if not os.path.exists('./{0}'.format(args.output_folder)):
+        os.makedirs('./{0}'.format(args.output_folder))
     args.steps = 0
 
     main(args)

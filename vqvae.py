@@ -5,10 +5,10 @@ from torchvision import transforms, datasets
 from torchvision.utils import save_image, make_grid
 import tqdm
 from modules import VectorQuantizedVAE, to_scalar
-from datasets import MiniImagenet, ISIC
+from datasets import ISIC
 import wandb
 import datetime
-# from tensorboardX import SummaryWriter
+
 
 def train(data_loader, model, optimizer, args, batch_bar=None):
     for images, _ in data_loader:
@@ -27,9 +27,6 @@ def train(data_loader, model, optimizer, args, batch_bar=None):
         loss = loss_recons + loss_vq + args.beta * loss_commit
         loss.backward()
 
-        # Logs
-        # writer.add_scalar('loss/train/reconstruction', loss_recons.item(), args.steps)
-        # writer.add_scalar('loss/train/quantization', loss_vq.item(), args.steps)
         wandb.log({'loss/train/reconstruction': loss_recons.item(), 'loss/train/quantization': loss_vq.item()}, args.steps)
         optimizer.step()
         args.steps += 1
@@ -51,9 +48,6 @@ def test(data_loader, model, args, batch_bar=None):
         loss_recons /= len(data_loader)
         loss_vq /= len(data_loader)
         
-    # Logs
-    # writer.add_scalar('loss/test/reconstruction', loss_recons.item(), args.steps)
-    # writer.add_scalar('loss/test/quantization', loss_vq.item(), args.steps)
     wandb.log({'loss/test/reconstruction': loss_recons.item(),'loss/test/quantization': loss_vq.item() }, step=args.steps)
     return loss_recons.item(), loss_vq.item()
 
@@ -83,7 +77,6 @@ def main(args):
                dir='./logs/{0}'.format(args.output_folder),
                )
     
-    # writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
     save_filename = './models/{0}'.format(args.output_folder)
 
     if args.dataset in ['mnist', 'fashion-mnist', 'cifar10']:
@@ -92,41 +85,25 @@ def main(args):
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
         if args.dataset == 'mnist':
-            # Define the train & test datasets
             train_dataset = datasets.MNIST(args.data_folder, train=True,
                 download=True, transform=transform)
             test_dataset = datasets.MNIST(args.data_folder, train=False,
                 transform=transform)
             num_channels = 1
         elif args.dataset == 'fashion-mnist':
-            # Define the train & test datasets
             train_dataset = datasets.FashionMNIST(args.data_folder,
                 train=True, download=True, transform=transform)
             test_dataset = datasets.FashionMNIST(args.data_folder,
                 train=False, transform=transform)
             num_channels = 1
         elif args.dataset == 'cifar10':
-            # Define the train & test datasets
             train_dataset = datasets.CIFAR10(args.data_folder,
                 train=True, download=True, transform=transform)
             test_dataset = datasets.CIFAR10(args.data_folder,
                 train=False, transform=transform)
             num_channels = 3
         valid_dataset = test_dataset
-    elif args.dataset == 'miniimagenet':
-        transform = transforms.Compose([
-            transforms.RandomResizedCrop(128),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ])
-        # Define the train, valid & test datasets
-        train_dataset = MiniImagenet(args.data_folder, train=True,
-            download=True, transform=transform)
-        valid_dataset = MiniImagenet(args.data_folder, valid=True,
-            download=True, transform=transform)
-        test_dataset = MiniImagenet(args.data_folder, test=True,
-            download=True, transform=transform)
-        num_channels = 3
+
     elif args.dataset == 'isic':
         transform = transforms.Compose([
             transforms.CenterCrop(size=(args.input_crop_size,args.input_crop_size)),
@@ -135,12 +112,9 @@ def main(args):
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
-        train_dataset = ISIC(args.data_folder, train=True,
-            download=True, transform=transform)
-        valid_dataset = ISIC(args.data_folder, valid=True,
-            download=True, transform=transform)
-        test_dataset = ISIC(args.data_folder, test=True,
-            download=True, transform=transform)
+        train_dataset = ISIC(args.data_folder, train=True, transform=transform)
+        valid_dataset = ISIC(args.data_folder, valid=True, transform=transform)
+        test_dataset = ISIC(args.data_folder, test=True, transform=transform)
         num_channels = 3
 
     # Define the data loaders
@@ -153,18 +127,8 @@ def main(args):
     test_loader = torch.utils.data.DataLoader(test_dataset,
         batch_size=16, shuffle=True)
 
-    # Fixed images for Tensorboard
-    # fixed_images, _ = next(iter(test_loader))
-    # fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
-    # writer.add_image('original', fixed_grid, 0)
-
     model = VectorQuantizedVAE(num_channels, args.hidden_size, args.k).to(args.device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-
-    # Generate the samples first once
-    # reconstruction = generate_samples(fixed_images, model, args)
-    # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
-    # writer.add_image('reconstruction', grid, 0)
 
     best_loss = -1.
     batch_bar = tqdm.tqdm(range(len(train_loader)),desc="Training")
@@ -175,9 +139,6 @@ def main(args):
         batch_bar.reset(total=(len(valid_loader)))
         batch_bar.set_description(desc="Validating")
         loss, _ = test(valid_loader, model, args, batch_bar)
-        # reconstruction = generate_samples(fixed_images, model, args)
-        # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
-        # writer.add_image('reconstruction', grid, epoch + 1)
 
         if (epoch == 0) or (loss < best_loss):
             best_loss = loss
@@ -195,16 +156,24 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='VQ-VAE')
 
     # General
-    parser.add_argument('--data-folder', type=str, default='/tmp/miniimagenet',
+    parser.add_argument('--data-folder', type=str, default='/data',
         help='name of the data folder')
     parser.add_argument('--dataset', type=str, default='isic',
-        help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
+        help='name of the dataset (mnist, fashion-mnist, cifar10, isic)')
+    parser.add_argument('--output-folder', type=str, default='models/vqvae',
+        help='name of the output folder (default: vqvae)')
+    parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
+        help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
+    parser.add_argument('--device', type=str, default='cuda',
+        help='set the device (cpu or cuda, default: cpu)')
 
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
         help='size of the latent vectors (default: 256)')
     parser.add_argument('--k', type=int, default=1024,
         help='number of latent vectors (default: 1024)')
+    
+    # Image preprocess
     parser.add_argument('--input-crop-size', type=int,default=448,
         help='size of the cropped input image (default: 448)')
     parser.add_argument('--input-resize-size', type=int,default=128,
@@ -220,29 +189,17 @@ if __name__ == '__main__':
     parser.add_argument('--beta', type=float, default=1.0,
         help='contribution of commitment loss, between 0.1 and 2.0 (default: 1.0)')
 
-    # Miscellaneous
-    parser.add_argument('--output-folder', type=str, default='models/vqvae',
-        help='name of the output folder (default: vqvae)')
-    parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
-        help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
-    parser.add_argument('--device', type=str, default='cuda',
-        help='set the device (cpu or cuda, default: cpu)')
-
     args = parser.parse_args()
 
-    # Create logs and models folder if they don't exist
     if not os.path.exists('./logs'):
         os.makedirs('./logs')
     if not os.path.exists('./models'):
         os.makedirs('./models')
-    # Device
-    args.device = torch.device(args.device
-        if torch.cuda.is_available() else 'cpu')
-    # Slurm
-    if 'SLURM_JOB_ID' in os.environ:
-        args.output_folder += '-{0}'.format(os.environ['SLURM_JOB_ID'])
+    
+    args.device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    
     if not os.path.exists('./models/{0}'.format(args.output_folder)):
         os.makedirs('./models/{0}'.format(args.output_folder))
-    args.steps = 0
 
+    args.steps = 0
     main(args)

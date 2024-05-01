@@ -10,7 +10,6 @@ from datasets import MiniImagenet, ISIC
 from torchvision import datasets
 import wandb
 import datetime
-# from tensorboardX import SummaryWriter
 
 def train(data_loader, model, prior, optimizer, args, batch_bar=None):
     for images, labels in data_loader:
@@ -28,8 +27,6 @@ def train(data_loader, model, prior, optimizer, args, batch_bar=None):
                                latents.view(-1))
         loss.backward()
 
-        # Logs
-        # writer.add_scalar('loss/train', loss.item(), args.steps)
         wandb.log({'loss/train':loss.item()}, step=args.steps)
         optimizer.step()
         args.steps += 1
@@ -55,8 +52,6 @@ def test(data_loader, model, prior, args,  batch_bar=None):
 
         loss /= len(data_loader)
 
-    # Logs
-    # writer.add_scalar('loss/valid', loss.item(), args.steps)
     wandb.log({'loss/valid':loss.item()}, step=args.steps)
 
     return loss.item()
@@ -83,7 +78,6 @@ def main(args):
                dir='./logs/{0}'.format(args.output_folder),
                )
     
-    # writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
     save_filename = './models/{0}/prior.pt'.format(args.output_folder)
 
     if args.dataset in ['mnist', 'fashion-mnist', 'cifar10']:
@@ -92,41 +86,25 @@ def main(args):
             transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
         ])
         if args.dataset == 'mnist':
-            # Define the train & test datasets
             train_dataset = datasets.MNIST(args.data_folder, train=True,
                 download=True, transform=transform)
             test_dataset = datasets.MNIST(args.data_folder, train=False,
                 transform=transform)
             num_channels = 1
         elif args.dataset == 'fashion-mnist':
-            # Define the train & test datasets
             train_dataset = datasets.FashionMNIST(args.data_folder,
                 train=True, download=True, transform=transform)
             test_dataset = datasets.FashionMNIST(args.data_folder,
                 train=False, transform=transform)
             num_channels = 1
         elif args.dataset == 'cifar10':
-            # Define the train & test datasets
             train_dataset = datasets.CIFAR10(args.data_folder,
                 train=True, download=True, transform=transform)
             test_dataset = datasets.CIFAR10(args.data_folder,
                 train=False, transform=transform)
             num_channels = 3
         valid_dataset = test_dataset
-    elif args.dataset == 'miniimagenet':
-        transform = transforms.Compose([
-            transforms.RandomResizedCrop(128),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
-        ])
-        # Define the train, valid & test datasets
-        train_dataset = MiniImagenet(args.data_folder, train=True,
-            download=True, transform=transform)
-        valid_dataset = MiniImagenet(args.data_folder, valid=True,
-            download=True, transform=transform)
-        test_dataset = MiniImagenet(args.data_folder, test=True,
-            download=True, transform=transform)
-        num_channels = 3
+  
     elif args.dataset == 'isic':
         transform = transforms.Compose([
             transforms.CenterCrop(size=(args.input_crop_size,args.input_crop_size)),
@@ -144,7 +122,6 @@ def main(args):
         num_channels = 3
         args.num_classes = None
 
-    # Define the data loaders
     train_loader = torch.utils.data.DataLoader(train_dataset,
         batch_size=args.batch_size, shuffle=False,
         num_workers=args.num_workers, pin_memory=True)
@@ -154,14 +131,6 @@ def main(args):
     test_loader = torch.utils.data.DataLoader(test_dataset,
         batch_size=16, shuffle=True)
 
-    # Save the label encoder
-    # with open('./models/{0}/labels.json'.format(args.output_folder), 'w') as f:
-        # json.dump(train_dataset._label_encoder, f)
-
-    # Fixed images for Tensorboard
-    # fixed_images, _ = next(iter(test_loader))
-    # fixed_grid = make_grid(fixed_images, nrow=8, range=(-1, 1), normalize=True)
-    # writer.add_image('original', fixed_grid, 0)
 
     model = VectorQuantizedVAE(num_channels, args.hidden_size_vae, args.k).to(args.device)
     with open(args.model, 'rb') as f:
@@ -198,12 +167,20 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='PixelCNN Prior for VQ-VAE')
 
     # General
-    parser.add_argument('--data-folder', type=str, default='/tmp/miniimagenet',
+    parser.add_argument('--data-folder', type=str, default='/data',
         help='name of the data folder')
     parser.add_argument('--dataset', type=str, default='isic',
-        help='name of the dataset (mnist, fashion-mnist, cifar10, miniimagenet, isic)')
+        help='name of the dataset (mnist, fashion-mnist, cifar10, isic)')
     parser.add_argument('--model', type=str, default='models/models/vqvae/best.pt',
         help='filename containing the model')
+    parser.add_argument('--output-folder', type=str, default='models/pixelcnn_prior',
+        help='name of the output folder (default: prior)')
+    parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
+        help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
+    parser.add_argument('--device', type=str, default='cuda',
+        help='set the device (cpu or cuda, default: cpu)')
+    
+    # Image preprocesss
     parser.add_argument('--input-crop-size', type=int,default=448,
         help='size of the cropped input image (default: 448)')
     parser.add_argument('--input-resize-size', type=int,default=128,
@@ -212,13 +189,9 @@ if __name__ == '__main__':
     # Latent space
     parser.add_argument('--hidden-size-vae', type=int, default=256,
         help='size of the latent vectors (default: 256)')
-    parser.add_argument('--hidden-size-prior', type=int, default=80,
-        help='hidden size for the PixelCNN prior (default: 80)')
     parser.add_argument('--k', type=int, default=1024,
         help='number of latent vectors (default: 1024)')
-    parser.add_argument('--num-layers', type=int, default=15,
-        help='number of layers for the PixelCNN prior (default: 15)')
-
+    
     # Optimization
     parser.add_argument('--batch-size', type=int, default=128,
         help='batch size (default: 128)')
@@ -226,29 +199,24 @@ if __name__ == '__main__':
         help='number of epochs (default: 100)')
     parser.add_argument('--lr', type=float, default=3e-4,
         help='learning rate for Adam optimizer (default: 3e-4)')
+    
+    # Prior
+    parser.add_argument('--hidden-size-prior', type=int, default=80,
+        help='hidden size for the PixelCNN prior (default: 80)')
+    parser.add_argument('--num-layers', type=int, default=15,
+        help='number of layers for the PixelCNN prior (default: 15)')
     parser.add_argument('--num-classes', type=int, default=10,
                         help='number of classes of data')
-    # Miscellaneous
-    parser.add_argument('--output-folder', type=str, default='models/pixelcnn_prior',
-        help='name of the output folder (default: prior)')
-    parser.add_argument('--num-workers', type=int, default=mp.cpu_count() - 1,
-        help='number of workers for trajectories sampling (default: {0})'.format(mp.cpu_count() - 1))
-    parser.add_argument('--device', type=str, default='cuda',
-        help='set the device (cpu or cuda, default: cpu)')
 
     args = parser.parse_args()
 
-    # Create logs and models folder if they don't exist
     if not os.path.exists('./logs'):
         os.makedirs('./logs')
     if not os.path.exists('./models'):
         os.makedirs('./models')
-    # Device
-    args.device = torch.device(args.device
-        if torch.cuda.is_available() else 'cpu')
-    # Slurm
-    if 'SLURM_JOB_ID' in os.environ:
-        args.output_folder += '-{0}'.format(os.environ['SLURM_JOB_ID'])
+    
+    args.device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
+    
     if not os.path.exists('./models/{0}'.format(args.output_folder)):
         os.makedirs('./models/{0}'.format(args.output_folder))
     args.steps = 0
