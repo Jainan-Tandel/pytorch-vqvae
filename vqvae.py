@@ -6,10 +6,11 @@ from torchvision.utils import save_image, make_grid
 import tqdm
 from modules import VectorQuantizedVAE, to_scalar
 from datasets import MiniImagenet, ISIC
+import wandb
+import datetime
+# from tensorboardX import SummaryWriter
 
-from tensorboardX import SummaryWriter
-
-def train(data_loader, model, optimizer, args, writer, batch_bar=None):
+def train(data_loader, model, optimizer, args, batch_bar=None):
     for images, _ in data_loader:
         images = images.to(args.device)
 
@@ -27,15 +28,15 @@ def train(data_loader, model, optimizer, args, writer, batch_bar=None):
         loss.backward()
 
         # Logs
-        writer.add_scalar('loss/train/reconstruction', loss_recons.item(), args.steps)
-        writer.add_scalar('loss/train/quantization', loss_vq.item(), args.steps)
-
+        # writer.add_scalar('loss/train/reconstruction', loss_recons.item(), args.steps)
+        # writer.add_scalar('loss/train/quantization', loss_vq.item(), args.steps)
+        wandb.log({'loss/train/reconstruction': loss_recons.item(), 'loss/train/quantization': loss_vq.item()}, args.steps)
         optimizer.step()
         args.steps += 1
         if batch_bar:
             batch_bar.update()
 
-def test(data_loader, model, args, writer, batch_bar=None):
+def test(data_loader, model, args, batch_bar=None):
     with torch.no_grad():
         loss_recons, loss_vq = 0., 0.
         for images, _ in data_loader:
@@ -51,9 +52,9 @@ def test(data_loader, model, args, writer, batch_bar=None):
         loss_vq /= len(data_loader)
         
     # Logs
-    writer.add_scalar('loss/test/reconstruction', loss_recons.item(), args.steps)
-    writer.add_scalar('loss/test/quantization', loss_vq.item(), args.steps)
-
+    # writer.add_scalar('loss/test/reconstruction', loss_recons.item(), args.steps)
+    # writer.add_scalar('loss/test/quantization', loss_vq.item(), args.steps)
+    wandb.log({'loss/test/reconstruction': loss_recons.item(),'loss/test/quantization': loss_vq.item() }, step=args.steps)
     return loss_recons.item(), loss_vq.item()
 
 def generate_samples(images, model, args):
@@ -63,7 +64,26 @@ def generate_samples(images, model, args):
     return x_tilde
 
 def main(args):
-    writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
+    timestamp = datetime.datetime.now().strftime("%d_%m_%Y_%H_%M_%S")
+
+    wandb.init(project = "VQVAE_DL",
+               entity = "m23csa010",
+               config={
+                   "lr":args.lr,
+                   "epochs":args.num_epochs,
+                   "latent_size":args.hidden_size,
+                   "latent_number":args.k,
+                   "input_crop_size":args.input_crop_size,
+                   "input_resize_size":args.input_resize_size,
+                   "batch_size":args.batch_size,
+                   "dataset":args.dataset,
+                   "device":args.device
+               },
+               name=f"VQVAE_{timestamp}",
+               dir='./logs/{0}'.format(args.output_folder),
+               )
+    
+    # writer = SummaryWriter('./logs/{0}'.format(args.output_folder))
     save_filename = './models/{0}'.format(args.output_folder)
 
     if args.dataset in ['mnist', 'fashion-mnist', 'cifar10']:
@@ -109,8 +129,8 @@ def main(args):
         num_channels = 3
     elif args.dataset == 'isic':
         transform = transforms.Compose([
-            transforms.CenterCrop(size=(448,448)),
-            transforms.Resize(size=(args.input_crop_size,args.input_crop_size)),
+            transforms.CenterCrop(size=(args.input_crop_size,args.input_crop_size)),
+            transforms.Resize(size=(args.input_resize_size,args.input_resize_size)),
             # transforms.RandomResizedCrop(size = (64,64), scale = (1,1)),
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
@@ -151,10 +171,10 @@ def main(args):
     for epoch in tqdm.tqdm(range(args.num_epochs), desc="Epochs"):
         batch_bar.reset(total=(len(train_loader)))
         batch_bar.set_description(desc="Training")
-        train(train_loader, model, optimizer, args, writer, batch_bar)
+        train(train_loader, model, optimizer, args, batch_bar)
         batch_bar.reset(total=(len(valid_loader)))
         batch_bar.set_description(desc="Validating")
-        loss, _ = test(valid_loader, model, args, writer, batch_bar)
+        loss, _ = test(valid_loader, model, args, batch_bar)
         # reconstruction = generate_samples(fixed_images, model, args)
         # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
         # writer.add_image('reconstruction', grid, epoch + 1)
@@ -183,15 +203,17 @@ if __name__ == '__main__':
     # Latent space
     parser.add_argument('--hidden-size', type=int, default=256,
         help='size of the latent vectors (default: 256)')
-    parser.add_argument('--k', type=int, default=512,
-        help='number of latent vectors (default: 512)')
-    parser.add_argument('--input-crop-size', type=int,default=64,
-        help='size of the cropped input image (default: 64)')
-
+    parser.add_argument('--k', type=int, default=1024,
+        help='number of latent vectors (default: 1024)')
+    parser.add_argument('--input-crop-size', type=int,default=448,
+        help='size of the cropped input image (default: 448)')
+    parser.add_argument('--input-resize-size', type=int,default=128,
+        help='size of the cropped input image (default: 128)')
+    
     # Optimization
     parser.add_argument('--batch-size', type=int, default=128,
         help='batch size (default: 128)')
-    parser.add_argument('--num-epochs', type=int, default=2,
+    parser.add_argument('--num-epochs', type=int, default=100,
         help='number of epochs (default: 100)')
     parser.add_argument('--lr', type=float, default=2e-4,
         help='learning rate for Adam optimizer (default: 2e-4)')

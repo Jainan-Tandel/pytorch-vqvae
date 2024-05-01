@@ -158,8 +158,7 @@ class ISIC(data.Dataset):
         #     self.download()
         
         if not self._check_exists():
-            print(self.image_folder)
-            raise RuntimeError('Dataset not found. You can use `download=True` '
+            raise RuntimeError(f'Dataset not found at {self.image_folder}. You can use `download=True` '
                                'to download it')
         self._data = os.listdir(self.image_folder)
         # Extract filenames and labels

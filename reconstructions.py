@@ -8,49 +8,7 @@ from modules import VectorQuantizedVAE, to_scalar, GatedPixelCNN
 from datasets import MiniImagenet, ISIC
 import matplotlib.pyplot as plt
 
-from tensorboardX import SummaryWriter
-
-def train(data_loader, model, optimizer, args, writer):
-    for images, _ in data_loader:
-        images = images.to(args.device)
-
-        optimizer.zero_grad()
-        x_tilde, z_e_x, z_q_x = model(images)
-
-        # Reconstruction loss
-        loss_recons = F.mse_loss(x_tilde, images)
-        # Vector quantization objective
-        loss_vq = F.mse_loss(z_q_x, z_e_x.detach())
-        # Commitment objective
-        loss_commit = F.mse_loss(z_e_x, z_q_x.detach())
-
-        loss = loss_recons + loss_vq + args.beta * loss_commit
-        loss.backward()
-
-        # Logs
-        writer.add_scalar('loss/train/reconstruction', loss_recons.item(), args.steps)
-        writer.add_scalar('loss/train/quantization', loss_vq.item(), args.steps)
-
-        optimizer.step()
-        args.steps += 1
-
-def test(data_loader, model, args, writer):
-    with torch.no_grad():
-        loss_recons, loss_vq = 0., 0.
-        for images, _ in data_loader:
-            images = images.to(args.device)
-            x_tilde, z_e_x, z_q_x = model(images)
-            loss_recons += F.mse_loss(x_tilde, images)
-            loss_vq += F.mse_loss(z_q_x, z_e_x)
-
-        loss_recons /= len(data_loader)
-        loss_vq /= len(data_loader)
-
-    # Logs
-    writer.add_scalar('loss/test/reconstruction', loss_recons.item(), args.steps)
-    writer.add_scalar('loss/test/quantization', loss_vq.item(), args.steps)
-
-    return loss_recons.item(), loss_vq.item()
+# from tensorboardX import SummaryWriter
 
 def generate_samples(images, model, args):
     with torch.no_grad():
@@ -132,10 +90,10 @@ def main(args):
             transforms.ToTensor(),
             transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225))
         ])
-        train_dataset = ISIC(args.data_folder, train=True,
-            download=True, transform=transform)
-        valid_dataset = ISIC(args.data_folder, valid=True,
-            download=True, transform=transform)
+        # train_dataset = ISIC(args.data_folder, train=True,
+        #     download=True, transform=transform)
+        # valid_dataset = ISIC(args.data_folder, valid=True,
+        #     download=True, transform=transform)
         test_dataset = ISIC(args.data_folder, test=True,
             download=True, transform=transform)
         num_channels = 3
@@ -143,12 +101,12 @@ def main(args):
         unnormalize_params = {'mean':(0.485, 0.456, 0.406),'std':(0.229, 0.224, 0.225)}
 
     # Define the data loaders
-    train_loader = torch.utils.data.DataLoader(train_dataset,
-        batch_size=args.batch_size, shuffle=False,
-        num_workers=args.num_workers, pin_memory=True)
-    valid_loader = torch.utils.data.DataLoader(valid_dataset,
-        batch_size=args.batch_size, shuffle=False, drop_last=True,
-        num_workers=args.num_workers, pin_memory=True)
+    # train_loader = torch.utils.data.DataLoader(train_dataset,
+    #     batch_size=args.batch_size, shuffle=False,
+    #     num_workers=args.num_workers, pin_memory=True)
+    # valid_loader = torch.utils.data.DataLoader(valid_dataset,
+    #     batch_size=args.batch_size, shuffle=False, drop_last=True,
+    #     num_workers=args.num_workers, pin_memory=True)
     test_loader = torch.utils.data.DataLoader(test_dataset,
         batch_size=16, shuffle=False)
 
@@ -169,9 +127,9 @@ def main(args):
     
     pixelweights = torch.load('models/models/pixelcnn_prior/prior.pt')
     prior.load_state_dict(pixelweights)
-    # Generate the samples first once
-    reconstruction = generate_samples(fixed_images, model, args)
     
+    # for fixed_image, fixed_labels in test_loader:
+    reconstruction = generate_samples(fixed_images, model, args)
     artificial = generate_pixel_samples(fixed_labels, model, prior, args, shape = prior_shape)
     # grid = make_grid(reconstruction.cpu(), nrow=8, range=(-1, 1), normalize=True)
     # writer.add_image('reconstruction', grid, 0)
